@@ -1,0 +1,28 @@
+{
+  "name": "commonground",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20.9"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "node scripts/check-mcp-import-boundary.mjs",
+    "seed": "node seed/index.mjs",
+    "spike:meko": "node --env-file=.env --import tsx spikes/meko.ts",
+    "spike:db": "node --env-file=.env --import tsx spikes/db.ts",
+    "spike:llm": "node --env-file=.env --import tsx spikes/llm.ts",
+    "check:spikes": "tsc -p tsconfig.spikes.json"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

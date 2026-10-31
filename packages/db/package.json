@@ -1,0 +1,13 @@
+{
+  "name": "@commonground/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1"
+  }
+}

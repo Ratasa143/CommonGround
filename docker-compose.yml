@@ -1,0 +1,65 @@
+# YugabyteDB 2026.1.2.0-b137, following the official Docker quick start:
+# https://docs.yugabyte.com/stable/quick-start/docker/
+services:
+  yb-node1:
+    image: yugabytedb/yugabyte:2026.1.2.0-b137
+    container_name: yb-node1
+    hostname: yb-node1
+    command: ["bin/yugabyted", "start", "--base_dir=/home/yugabyte/yb_data", "--background=false"]
+    ports:
+      - "5433:5433"
+      - "7000:7000"
+      - "9000:9000"
+      - "9042:9042"
+      - "15433:15433"
+    volumes:
+      - yb-node1-data:/home/yugabyte/yb_data
+    networks: [yb]
+    restart: unless-stopped
+
+  yb-node2:
+    image: yugabytedb/yugabyte:2026.1.2.0-b137
+    container_name: yb-node2
+    hostname: yb-node2
+    command: ["bin/yugabyted", "start", "--join=yb-node1", "--base_dir=/home/yugabyte/yb_data", "--background=false"]
+    depends_on:
+      yb-node1:
+        condition: service_started
+    ports:
+      - "5434:5433"
+      - "7001:7000"
+      - "9001:9000"
+      - "9043:9042"
+      - "15434:15433"
+    volumes:
+      - yb-node2-data:/home/yugabyte/yb_data
+    networks: [yb]
+    restart: unless-stopped
+
+  yb-node3:
+    image: yugabytedb/yugabyte:2026.1.2.0-b137
+    container_name: yb-node3
+    hostname: yb-node3
+    command: ["bin/yugabyted", "start", "--join=yb-node1", "--base_dir=/home/yugabyte/yb_data", "--background=false"]
+    depends_on:
+      yb-node1:
+        condition: service_started
+    ports:
+      - "5435:5433"
+      - "7002:7000"
+      - "9002:9000"
+      - "9044:9042"
+      - "15435:15433"
+    volumes:
+      - yb-node3-data:/home/yugabyte/yb_data
+    networks: [yb]
+    restart: unless-stopped
+
+networks:
+  yb:
+    name: commonground-yb
+
+volumes:
+  yb-node1-data:
+  yb-node2-data:
+  yb-node3-data:
