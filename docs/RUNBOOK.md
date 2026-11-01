@@ -18,6 +18,10 @@ Keep operational state in YugabyteDB. Meko supplies bounded agent context and le
 
 Defer general chat, real integrations, extra grievance categories, automatic repair dispatch, public rankings, leadership analytics, CDC/Kafka, semantic deduplication, Insights, artifacts, and LISTEN/NOTIFY. Keep the call log, redaction, idempotency, human approval gate, and failure behavior in scope.
 
+### Owner-approved scope update: separate student Support / Care Track
+
+The product owner has requested a separate route for students seeking help with bullying, ragging, sexual harassment, discrimination, or other personal concerns. This is a deliberate scope expansion beyond the original Wi-Fi-only slice; it does **not** add those reports to `incidents` or the ordinary staff queue. Until the separate Care Track has verified campus policy/ownership, real identity and role-based access, isolated encrypted storage, access auditing, retention/deletion, recusal/escalation behavior, and security review, the running preview may show only carefully verified support resources and must clearly say it is not a confidential reporting channel. It must not accept case narratives or send any care data to Meko, a model, product analytics, or the swarm view. See `docs/CARE_TRACK_DESIGN.md`. Implement formal intake only as its own gated Care Track work with institutional/legal review; deadlines and roles are campus-configured, not hard-coded.
+
 ## Before coding: accounts and setup
 
 ### Meko and Codex
