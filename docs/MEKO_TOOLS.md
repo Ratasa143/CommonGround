@@ -2,6 +2,12 @@
 
 Direct tools/list result captured on 2026-10-31T17:24:02.704Z.
 
+## Authentication and authorization note
+
+Meko MCP tool schemas describe arguments, not authorization. Each API key acts as its owning Meko account; datapack membership grants access. Application role routing must choose a role-specific account credential and an explicitly permitted datapack. `agent_id` is a memory/conversation namespace or trace-attribution field and is not an authorization boundary. In particular, `memory_search` searches across agent namespaces within the selected datapack for the authenticated user. Owners and Maintainers can promote; Contributors can add memories; Viewers can read but cannot add or promote. See the official [Meko access guide](https://docs.mekodata.ai/architecture/core-concepts/manage-access/) and [MCP reference](https://docs.mekodata.ai/reference/mcp-server/).
+
+CommonGround role policy: Triage searches `cg-triage` and `cg-commons`, and writes only to `cg-triage`; Bridge searches and writes only to `cg-bridge`; Curator writes lesson drafts only to `cg-commons`; Approval Service promotes only in `cg-commons`, after the application's persisted approval check. Never use an actor string or `agent_id` to select or authorize a credential.
+
 ## knowledgebase_search
 
 ```json

@@ -15,9 +15,10 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "node scripts/check-mcp-import-boundary.mjs",
     "seed": "node seed/index.mjs",
-    "spike:meko": "node --env-file=.env --import tsx spikes/meko.ts",
-    "spike:db": "node --env-file=.env --import tsx spikes/db.ts",
-    "spike:llm": "node --env-file=.env --import tsx spikes/llm.ts",
+    "spike:meko": "node --env-file-if-exists=.env --import tsx spikes/meko.ts",
+    "spike:db": "node --env-file-if-exists=.env --import tsx spikes/db.ts",
+    "spike:llm": "node --env-file-if-exists=.env --import tsx spikes/llm.ts",
+    "migrate:db": "node --env-file-if-exists=.env --import tsx scripts/migrate-db.ts",
     "check:spikes": "tsc -p tsconfig.spikes.json"
   },
   "devDependencies": {

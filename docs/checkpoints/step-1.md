@@ -1,32 +1,37 @@
 # Step 1 checkpoint — Spikes and frozen contracts
 
-Date: 2026-10-31 (Asia/Calcutta)
+Date: 2026-11-01 (Asia/Calcutta)
 
-## Scope
+## Scope and status
 
-Completed the core Zod contracts and live direct Meko SDK tool/schema and synthetic round-trip spikes. The Yugabyte runtime spike is blocked on downloading the pinned image. The model spike has a substitute Mistral benchmark; the requested Qwen and Gemini checks remain unavailable. No Step 2 data-layer implementation started because Step 1 gates are not complete.
+Step 1 is complete and `packages/core` contracts are frozen for downstream implementation. Evidence and GO/NO-GO decisions per spike are recorded in `docs/SPIKE_RESULTS.md`. Meko role-specific and model fallback checks remain explicit limitations; dependent product behaviors stay gated.
 
 ## Correctness evidence
 
 - `npm run check:spikes` — passed (`tsc -p tsconfig.spikes.json`).
 - `npm run lint` — passed: `MCP SDK import boundary passed.`
-- `npm run build` — passed across all workspaces; Next.js production build compiled, type-checked, generated static pages, and finalized successfully.
-- `npm run build -w @commonground/core` — passed earlier; contracts compile.
-- `docker compose config --quiet` — passed.
-- `docker info --format '{{.ServerVersion}}'` — `29.6.2`.
-- `docker compose up -d` — attempted with pinned image `yugabytedb/yugabyte:2026.1.2.0-b137`. Image transfer advanced to 109.1 MB on an active layer over about 45 minutes and was interrupted; `docker compose ps --format '{{.Name}} {{.State}}'` returned no containers. No SQL or transaction evidence exists.
-- Meko direct SDK `tools/list` — 42 tools; live schemas saved in `docs/MEKO_TOOLS.md`. Synthetic memory round trip found the test marker; write plus first successful search took 8,573 ms. Synthetic conversation message accepted. Owner-only promotion succeeded in isolated `cg-spike`.
-- Meko Maintainer, Viewer, cross-identity, and quota checks — unverified; no suitable identities/credentials were available. Dedicated team build datapack ID — not supplied; no project memory saved in any datapack.
-- Ollama Mistral substitute — 10/10 valid synthetic JSON responses, 21,667 ms median. Qwen3 8B pull failed DNS resolution; Gemini model listing/live call not run because no API key was available.
+- `npm run build` — passed across workspaces; Next.js production build compiled, type-checked, generated static pages, and finalized successfully.
+- `npm run build -w @commonground/core` — passed; contracts compile.
+- `docker pull --quiet yugabytedb/yugabyte:2026.1.2.0-b137` — passed.
+- `docker compose config --quiet` — passed. Three-node cluster started; `docker exec yb-node1 bin/yugabyted status` reported Running, YSQL Ready, Replication Factor 3.
+- `$env:YB_URL='postgresql://yugabyte:yugabyte@localhost:5433/yugabyte'; node --import tsx spikes/db.ts` — passed. Server: PostgreSQL 15.12-YB-2026.1.2.0-b0. Default isolation: `read committed`. Connection one locked a row; connection two's `FOR UPDATE SKIP LOCKED` returned zero rows; result `PASS`.
+- Live Meko SDK list: 42 tools; schemas in `docs/MEKO_TOOLS.md`. Synthetic write/search/conversation/Owner promotion passed in `cg-spike`.
+- `team-build` ID `576d6b7e-b56e-4286-a40d-82bca573e4c1` is accessible with Owner grant. After confirming it was empty, the user-requested test memory (UUID `574a4fc9-41b3-4311-9337-91cb1efb274c`) was written, found by the first query and fetched by ID in 12,986 ms through search. It was not promoted.
+- Meko Maintainer/Viewer/cross-identity/quota behavior remains unverified. Keep Insights and automatic cross-identity promotion out of scope; preserve human approval in application code.
+- Mistral substitute benchmark: 10/10 synthetic JSON responses valid, median 21,667 ms. Use installed `mistral:latest` as provisional local development model; validate proposal quality in Step 6. Qwen download failed DNS; Gemini wasn't tested due missing API key.
 
 ## Efficiency
 
-Elapsed work for this continuation was approximately 45–50 minutes, driven by the Docker image transfer. This exceeds the Step 1 target's 2-hour upper bound only if combined with the earlier Step 1 work; do not add scope. Do not start Step 2 until the blocked Step 1 gates are either verified or explicitly revised in the runbook.
+Elapsed Step 1 work was approximately 1 hour 55 minutes against its 0.5–2 hour estimate. The Docker image transfer initially stalled; the retry later succeeded. A named data volume failed due to image-user permissions, so the temporary spike uses the container writable layer. Persistent-volume setup is deferred to Step 10.
 
-## Decisions and outstanding gates
+## Decisions
 
-- Keep the verified contracts as the current core candidate, but do not freeze them as a completed Step 1 checkpoint until all required evidence and decisions are addressed.
-- Keep Meko project knowledge out of the default and `cg-spike` datapacks. Need the team-created build datapack's real ID. Retest identity-sensitive Meko checks with correct roles before relying on those permissions.
-- Do not select Mistral as the product model from this substitute run. Need the Qwen benchmark or an approved change to the local-model gate; Gemini requires a configured key and model listing.
-- Retry the Yugabyte image pull when registry/blob transfer is reliable; then run `npm run spike:db` and record version, isolation, and two-connection lock output.
-- `docs/SPIKE_RESULTS.md` records current evidence and failures.
+- Freeze the compiled core contracts.
+- Keep coding-agent knowledge in the confirmed `team-build` datapack; keep product `cg-*` packs separate.
+- Treat Mistral as a local development baseline, not a final quality decision. Gemini is not pinned.
+- Keep permission-dependent Insights and promotion integrations gated until Maintainer/Viewer credentials and cross-identity behavior are verified.
+- Three-node YSQL runtime is verified; Step 2 may proceed. Do not claim node-kill tolerance before its dedicated test.
+
+## Evidence index
+
+`docs/SPIKE_RESULTS.md` contains full outputs and official references. `docs/MEKO_TOOLS.md` contains the live MCP input schemas.
