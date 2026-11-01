@@ -1,7 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { randomUUID } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { createPool } from "../../../packages/db/src/index.js";
+import { MekoGateway, mekoConfigFromEnvironment } from "../../../packages/meko/src/index.js";
 import {
   approveProposal,
   confirmFix,
@@ -59,8 +61,9 @@ function lastEventCursor(value: string | undefined): { time: string; id: string 
   return { time, id };
 }
 
-export async function buildApp(pool = createPool(), options: { logger?: boolean } = {}): Promise<FastifyInstance> {
+export async function buildApp(pool = createPool(), options: { logger?: boolean; meko?: MekoGateway } = {}): Promise<FastifyInstance> {
   const app = Fastify({ logger: options.logger ?? true });
+  const meko = options.meko ?? new MekoGateway(pool, mekoConfigFromEnvironment());
 
   app.setErrorHandler((error, _request, reply) => {
     if (error instanceof z.ZodError) return reply.code(400).send({ error: "INVALID_REQUEST", details: error.issues });
@@ -73,6 +76,25 @@ export async function buildApp(pool = createPool(), options: { logger?: boolean 
   });
 
   app.get("/health", async () => ({ status: "ok" }));
+  app.get("/meko/status", async () => meko.getStatus());
+  app.post("/meko/preview-check", async (request, reply) => {
+    const persona = personaFor(request);
+    requireActor(persona, "maintenance_staff", "reviewer");
+    const status = meko.getStatus();
+    if (!status.triageReady) return reply.code(503).send({
+      error: "MEKO_SETUP_REQUIRED",
+      message: "Add the dedicated product Triage token, agent ID, and datapack ID to Alchemy's local .env, then restart the API.",
+    });
+    try {
+      const mekoRequest = { correlationId: randomUUID(), simulated: status.simulated };
+      const conversation = await meko.triage.openConversation(mekoRequest, "CommonGround synthetic connection check", randomUUID());
+      const recall = await meko.triage.recall(mekoRequest, conversation.conversationId, "triage",
+        "Synthetic evaluator check only: return approved, non-identifying campus Wi-Fi outage repair guidance. No live incident or student data is included.");
+      return { ok: true, mode: status.mode, simulated: recall.simulated, calls: conversation.callCount + recall.callCount, responseReceived: recall.result !== undefined };
+    } catch {
+      return reply.code(503).send({ error: "MEKO_UNAVAILABLE", message: "Meko did not return a response. Check the product token, datapack access and MCP URL." });
+    }
+  });
   app.get("/demo/personas", async () => Object.entries(demoPersonas).map(([key, value]) => ({ key, actor: value.actor, name: value.name })));
   app.get("/locations", async () => ({ locations: campusLocations, studySpaces: campusStudySpaces }));
 
@@ -107,9 +129,10 @@ export async function buildApp(pool = createPool(), options: { logger?: boolean 
   app.get<{ Params: { id: string } }>("/incidents/:id", async (request) => {
     const persona = personaFor(request);
     const incident = await pool.query(
-      `SELECT id, category, location_id AS "locationId", status, summary,
-              eta_minutes AS "etaMinutes", created_at AS "createdAt", updated_at AS "updatedAt"
-       FROM incidents WHERE id = $1`,
+      `SELECT i.id, i.category, i.location_id AS "locationId", i.status, i.summary,
+              i.eta_minutes AS "etaMinutes", i.created_at AS "createdAt", i.updated_at AS "updatedAt",
+              (SELECT COUNT(*)::int FROM reports r WHERE r.incident_id = i.id) AS "reportCount"
+       FROM incidents i WHERE i.id = $1`,
       [request.params.id],
     );
     if (!incident.rowCount) throw new DomainError("Incident not found.", "NOT_FOUND");
@@ -141,6 +164,7 @@ export async function buildApp(pool = createPool(), options: { logger?: boolean 
     const result = await pool.query(
       `SELECT i.id, i.category, i.location_id AS "locationId", i.status, i.summary,
               i.eta_minutes AS "etaMinutes", i.created_at AS "createdAt",
+              (SELECT COUNT(*)::int FROM reports r WHERE r.incident_id = i.id) AS "reportCount",
               (SELECT o.payload FROM outbox o
                WHERE o.aggregate_id = i.id AND o.event_type = 'incident.triage_proposed'
                ORDER BY o.created_at DESC LIMIT 1) AS proposal

@@ -126,6 +126,19 @@ export class MekoGateway {
 
   getCallCount(): number { return this.calls; }
 
+  getStatus() {
+    const roleReady = (role: MekoRole, pack: ProductDatapack) => {
+      const credential = this.config.credentials[role];
+      return this.config.mode !== "off" && Boolean(this.config.datapacks[pack] && credential?.agentId && (credential.token || this.config.stub));
+    };
+    const triageReady = roleReady("triage", "triage");
+    const bridgeReady = roleReady("bridge", "bridge");
+    const curatorReady = roleReady("curator", "commons");
+    const approverReady = roleReady("approver", "commons");
+    const mode = this.config.mode === "off" ? "off" : this.config.stub ? "preview" : triageReady ? "live" : "setup_required";
+    return { mode, simulated: Boolean(this.config.stub), triageReady, bridgeReady, curatorReady, approverReady } as const;
+  }
+
   private async openConversation(role: MekoRole, pack: ProductDatapack, request: MekoRequest, title: string, sessionId: string): Promise<OpenConversationResult> {
     const datapackId = this.requireDatapack(pack);
     const response = await this.invoke(role, request, pack, "conversation_create", {

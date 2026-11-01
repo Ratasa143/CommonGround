@@ -5,9 +5,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 type Persona = "student-a" | "student-b" | "maintenance" | "facilities" | "reviewer";
 type Section = "overview" | "report" | "requests" | "support" | "queue" | "approvals";
 type Location = { id: string; name: string };
+type MekoStatus = { mode: "off" | "preview" | "live" | "setup_required"; simulated: boolean; triageReady: boolean; bridgeReady: boolean; curatorReady: boolean; approverReady: boolean };
+type MekoCheck = { ok: boolean; mode?: string; simulated?: boolean; calls?: number; responseReceived?: boolean; message?: string };
 type Incident = {
   id: string; category: string; locationId: string; status: string; summary: string;
-  etaMinutes: number | null; createdAt: string;
+  etaMinutes: number | null; createdAt: string; reportCount?: number;
   proposal?: { proposal?: { reason?: string; summary?: string; suggestedEtaMinutes?: number }; simulated?: boolean } | null;
 };
 type IncidentView = {
@@ -53,6 +55,8 @@ export default function HomePage() {
   const [persona, setPersona] = useState<Persona>("student-a");
   const [section, setSection] = useState<Section>("overview");
   const [locations, setLocations] = useState<Location[]>([]);
+  const [mekoStatus, setMekoStatus] = useState<MekoStatus | null>(null);
+  const [mekoCheck, setMekoCheck] = useState<MekoCheck | null>(null);
   const [locationId, setLocationId] = useState("north-hostel");
   const [locationFromQr, setLocationFromQr] = useState(false);
   const [symptom, setSymptom] = useState("offline");
@@ -104,6 +108,8 @@ export default function HomePage() {
     fetch("/api/locations", { cache: "no-store" }).then((response) => response.json())
       .then((data) => setLocations(data.locations ?? []))
       .catch(() => announceError("CommonGround could not reach the service. Check that the API is running."));
+    fetch("/api/meko/status", { cache: "no-store" }).then((response) => response.json())
+      .then((data: MekoStatus) => setMekoStatus(data)).catch(() => setMekoStatus(null));
   }, []);
   useEffect(() => {
     if (!locations.length) return;
@@ -137,6 +143,16 @@ export default function HomePage() {
     finally { setBusy(false); }
   }
 
+  async function runMekoCheck() {
+    setMekoCheck(null);
+    await perform(async () => {
+      const result = await request("/meko/preview-check", { method: "POST", body: "{}" }) as MekoCheck;
+      setMekoCheck(result);
+      const refreshed = await fetch("/api/meko/status", { cache: "no-store" });
+      if (refreshed.ok) setMekoStatus(await refreshed.json() as MekoStatus);
+    }, "Meko answered the synthetic preview check.", "");
+  }
+
   async function submitReport(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const selectedSymptom = symptoms.find((item) => item.id === symptom) ?? symptoms[0]!;
@@ -161,7 +177,7 @@ export default function HomePage() {
     : staffTabs;
   const pageIntro = isStudent
     ? {
-        overview: ["Wi-Fi down? Start here.", "Tell us what’s happening. We’ll keep your updates in one place."],
+        overview: ["Support that keeps your night moving.", "One report starts a repair timeline and makes room for support while you wait."],
         report: ["Report a Wi-Fi issue.", "A few details help campus support find the problem."],
         requests: ["Your requests.", "See the latest status and updates shared by campus teams."],
         support: ["Support, on your terms.", "Browse support options without sharing personal details here."],
@@ -187,18 +203,28 @@ export default function HomePage() {
     <main className={`app-shell ${isStudent ? "student-shell" : ""}`}>
       <header className="masthead">
         <a className="brand" href="#home" onClick={(event) => { event.preventDefault(); setSection(isStudent ? "overview" : "queue"); }} aria-label="CommonGround home">
-          <CommonGroundMark /><span>common<span>ground</span><small>CAMPUS SUPPORT</small></span>
+          <CommonGroundMark /><span>Common<span>Ground</span><small>REPAIR · RELIEF</small></span>
         </a>
         <div className="masthead-right">
-          <label className="workspace-select"><span>Preview workspace</span><select value={persona} onChange={(event) => { setPersona(event.target.value as Persona); setIncidentId(""); setSection(event.target.value.startsWith("student") ? "overview" : "queue"); }}>
-            {personas.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
-          </select></label>
+          <nav className="role-switch" aria-label="Preview role">
+            {([
+              { id: "student", label: "Student" },
+              { id: "maintenance", label: "Technician" },
+              { id: "facilities", label: "Facilities" },
+              { id: "reviewer", label: "Reviewer" },
+            ] as const).map((role) => {
+              const selected = role.id === "student" ? isStudent : persona === role.id;
+              return <button key={role.id} type="button" aria-pressed={selected} className={selected ? "role-option active" : "role-option"} onClick={() => {
+                const nextPersona: Persona = role.id === "student" ? (isStudent ? persona : "student-a") : role.id;
+                setPersona(nextPersona); setIncidentId(""); setSection(role.id === "student" ? "overview" : "queue");
+              }}>{role.label}</button>;
+            })}
+          </nav>
+          {isStudent && <label className="student-preview-select" aria-label="Preview student"><span>Preview as</span><select value={persona} onChange={(event) => setPersona(event.target.value as Persona)}>{personas.filter((item) => item.id.startsWith("student")).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}
         </div>
       </header>
 
-      <div className="preview-note"><span>LOCAL PREVIEW</span> Workspaces are simulated for this build. Sign-in and production identity verification are not enabled.</div>
-
-      <section className="page-intro"><div><p className="eyebrow">{isStudent ? "CAMPUS SUPPORT" : `${personaInfo.role.toUpperCase()} WORKSPACE`}</p><h1>{pageIntro[0]}</h1><p>{pageIntro[1]}</p></div>{isStudent && section === "overview" && <button className="button-dark intro-action" onClick={() => setSection("report")}>Report a Wi-Fi issue <span aria-hidden="true">→</span></button>}</section>
+      <section className="page-intro"><div><p className="eyebrow">{isStudent ? "CAMPUS SUPPORT" : `${personaInfo.role.toUpperCase()} WORKSPACE`}<span className="preview-badge"><i /> LOCAL PREVIEW</span></p><h1>{pageIntro[0]}</h1><p>{pageIntro[1]}</p></div>{isStudent && section === "overview" && <button className="button-dark intro-action" onClick={() => setSection("report")}>Report a Wi-Fi issue <span aria-hidden="true">→</span></button>}</section>
 
       <nav className={`workspace-nav ${isStudent ? "student-nav" : ""}`} aria-label="Workspace navigation">
         <div className="nav-tabs">{tabs.map(([id, label]) => <button key={id} className={section === id ? "nav-tab active" : "nav-tab"} onClick={() => setSection(id)}><NavIcon id={id} /><span>{label}</span>{id === "requests" && myReports.length > 0 && <span className="count">{myReports.length}</span>}{id === "approvals" && <span className="count">{queue.filter((item) => item.status === "triage_proposed").length}</span>}</button>)}</div>
@@ -208,12 +234,30 @@ export default function HomePage() {
       {message && <div className={`notice notice-${messageKind}`} role={messageKind === "error" ? "alert" : "status"}><span className="notice-symbol">{messageKind === "error" ? "!" : "✓"}</span>{message}<button aria-label="Dismiss message" onClick={() => setMessage("")}>×</button></div>}
 
       {isStudent && section === "overview" && <section className="content-grid overview-grid">
-        <article className="intro-card"><span className="wifi-mark" aria-hidden="true"><i /><i /><i /><b /></span><div><p className="eyebrow">CAMPUS WI-FI</p><h2>Let’s get your connection back.</h2><p>Pick what’s happening and where. Add a note only if it helps the team find the issue.</p></div></article>
-        <article className="privacy-card"><span className="privacy-icon" aria-hidden="true">i</span><div><h3>Only share what helps</h3><p>Leave out passwords, phone numbers, and room numbers. Your report goes to campus support staff.</p></div></article>
-        <article className="support-shortcut"><span className="support-shortcut-mark" aria-hidden="true">+</span><div><p className="eyebrow">PERSONAL SUPPORT</p><h3>Find the right kind of help</h3><p>Browse support options without sharing a personal case here.</p></div><button className="button-outline" onClick={() => setSection("support")}>View support options <span aria-hidden="true">→</span></button></article>
+        <article className="intro-card">
+          <div className="hero-copy">
+            <p className="eyebrow">ONE REPORT · TWO RESPONSE PATHS</p>
+            <h2>A campus fault shouldn’t cost you the night.</h2>
+            <p>Report a Wi-Fi outage once. Campus staff own the repair; the planned Bridge circle offers an opt-in place to study while you wait.</p>
+            <button className="hero-cta" onClick={() => setSection("report")}>Report the outage <span aria-hidden="true">↗</span></button>
+            <small className="hero-reassurance">You choose whether to join a Bridge circle. It’s never automatic.</small>
+          </div>
+          <div className="hero-paths" aria-label="Two ways CommonGround responds">
+            <div className="hero-path repair-path"><span className="path-index">01</span><div><small>RESTORE SERVICE</small><strong>Accountable repair</strong><span>Assigned team · visible updates</span></div><span className="path-symbol" aria-hidden="true">⌁</span></div>
+            <div className="hero-path bridge-path"><span className="path-index">02</span><div><small>SUPPORT THE WAIT</small><strong>Opt-in Bridge circle</strong><span>Planned · opt-in · matching not active in preview</span></div><span className="path-symbol" aria-hidden="true">↗</span></div>
+            <div className="hero-measures"><div><b>TIME TO REPAIR</b><span>Report → confirmed fix</span></div><i /><div><b>TIME TO RELIEF</b><span>First meaningful help</span></div></div>
+          </div>
+          <span className="hero-orbit orbit-one" aria-hidden="true" /><span className="hero-orbit orbit-two" aria-hidden="true" />
+        </article>
+        <section className="student-metrics" aria-label="Your request summary">
+          <article><span className="metric-icon">↗</span><div><strong>{myReports.length}</strong><span>Requests sent</span></div></article>
+          <article><span className="metric-icon metric-working">◷</span><div><strong>{myReports.filter((item) => item.status !== "resolved").length}</strong><span>Still being followed up</span></div></article>
+          <article><span className="metric-icon metric-done">✓</span><div><strong>{myReports.filter((item) => item.status === "resolved").length}</strong><span>Resolved</span></div></article>
+        </section>
+        <article className="privacy-card"><span className="privacy-icon" aria-hidden="true">i</span><div><h3>Your report stays about the repair</h3><p>Only share what helps campus staff locate the fault. Bridge is a separate, optional way to find study company.</p></div></article>
         <section className="platform-grid" aria-label="How CommonGround works">
-          <article className="platform-card platform-meko"><div className="platform-card-top"><span className="platform-label">KNOWLEDGE LAYER</span><span className="integration-pill">Not connected in preview</span></div><h3>Meko</h3><p>Designed to hold approved, de-identified service lessons. No student report is sent to Meko or an AI model in this preview.</p></article>
-          <article className="platform-card platform-database"><div className="platform-card-top"><span className="platform-label">INCIDENT RECORD</span><span className="integration-pill active">Source of truth</span></div><h3>YugabyteDB</h3><p>Stores incident status and staff updates, keeping the case record authoritative if the knowledge layer is unavailable.</p></article>
+          <article className="platform-card platform-meko"><div className="platform-card-top"><span className="platform-label">MEKO KNOWLEDGE LAYER</span><span className={`integration-pill ${mekoStatus?.mode === "live" ? "active" : ""}`}>{mekoStatus?.mode === "live" ? "Triage live" : mekoStatus?.mode === "preview" ? "Simulated preview" : mekoStatus?.mode === "off" ? "Meko off" : "Product key needed"}</span></div><h3>Helpful lessons, with guardrails.</h3><p>The live check uses a synthetic Wi-Fi query only. Add the product Triage key and datapack to enable it; student tickets are never included in this test.</p></article>
+          <article className="platform-card platform-database"><div className="platform-card-top"><span className="platform-label">CASE RECORD</span><span className="integration-pill active">Connected</span></div><h3>YugabyteDB</h3><p>One shared case record keeps duplicate reports together and preserves the staff updates students rely on.</p></article>
         </section>
         <article className="recent-card"><div className="card-title-row"><div><p className="eyebrow">YOUR REQUESTS</p><h2>{myReports.length ? "Pick up where you left off" : "No requests yet"}</h2></div><button className="text-link" onClick={() => setSection("requests")}>View all <span>→</span></button></div>{myReports[0] ? <IncidentRow incident={myReports[0]} locations={locations} onClick={() => openIncident(myReports[0]!.id)} /> : <p className="recent-empty">Your updates will be kept here when you report a campus Wi-Fi issue.</p>}</article>
       </section>}
@@ -249,8 +293,9 @@ export default function HomePage() {
       {!isStudent && <section className="work-area">
         <div className="page-heading"><div><p className="eyebrow">{personaInfo.role.toUpperCase()} WORKSPACE</p><h2>{workHeading[0]}</h2><p>{workHeading[1]}</p></div><button className="button-outline" onClick={() => void loadQueue()}>↻ <span>Refresh cases</span></button></div>
         <div className="queue-toolbar"><span>{filteredQueue.length} {filteredQueue.length === 1 ? "case" : "cases"}{section === "approvals" ? " to review" : " in your view"}</span></div>
+        {(persona === "maintenance" || persona === "reviewer") && <section className="meko-test-panel" aria-label="Meko connection check"><div className="meko-test-copy"><span className={`meko-led ${mekoStatus?.mode === "live" ? "live" : mekoStatus?.mode === "preview" ? "preview" : ""}`} /><div><strong>{mekoStatus?.mode === "live" ? "Meko Triage is ready" : mekoStatus?.mode === "preview" ? "Meko preview is simulated" : mekoStatus?.mode === "off" ? "Meko is switched off" : "Connect Meko for the evaluation"}</strong><small>Runs a fixed synthetic query. No ticket, student or Bridge data is sent.</small></div></div><button className="button-outline" onClick={() => void runMekoCheck()} disabled={busy}>Run Meko check <span aria-hidden="true">↗</span></button>{mekoCheck && <p className={`meko-check-result ${mekoCheck.ok ? "success" : "error"}`} role="status">{mekoCheck.ok ? `Meko responded · ${mekoCheck.simulated ? "simulated" : "live"} · ${mekoCheck.calls ?? 0} tool calls` : mekoCheck.message ?? "Meko check failed."}</p>}</section>}
         <div className="staff-layout"><aside className="staff-views" aria-label="Saved case views"><p className="view-title">CASE VIEWS</p>{([ ["all", "All open", queue.length], ["new", "New", queue.filter((item) => item.status === "new").length], ["triage_proposed", "Awaiting review", queue.filter((item) => item.status === "triage_proposed").length], ["in_progress", "In progress", queue.filter((item) => item.status === "in_progress").length], ["fix_applied", "Fix applied", queue.filter((item) => item.status === "fix_applied").length] ] as Array<[string, string, number]>).map(([value, label, count]) => <button key={value} className={`view-button ${queueFilter === value ? "selected" : ""}`} onClick={() => { setQueueFilter(value); setSection("queue"); }}><span>{label}</span><b>{count}</b></button>)}</aside><div className="case-list">{(section === "approvals" ? filteredQueue.filter((item) => item.status === "triage_proposed") : filteredQueue).length ? (section === "approvals" ? filteredQueue.filter((item) => item.status === "triage_proposed") : filteredQueue).map((incident) => <article className="case-card" key={incident.id}>
-            <div className="case-card-header"><div><span className="case-kicker">WI-FI SUPPORT <span>·</span> {new Date(incident.createdAt).toLocaleString()}</span><h3>{incident.summary}</h3><p>{locations.find((location) => location.id === incident.locationId)?.name ?? incident.locationId} <span>·</span> Case {incident.id.slice(0, 8)}</p></div><Status value={incident.status} /></div>
+            <div className="case-card-header"><div><span className="case-kicker">WI-FI SUPPORT <span>·</span> {new Date(incident.createdAt).toLocaleString()}</span><h3>{incident.summary}</h3><p>{locations.find((location) => location.id === incident.locationId)?.name ?? incident.locationId} <span>·</span> Case {incident.id.slice(0, 8)} <span>·</span> {incident.reportCount ?? 0} {(incident.reportCount ?? 0) === 1 ? "report" : "reports"}</p></div><Status value={incident.status} /></div>
             {incident.proposal?.proposal && <div className="proposal-box"><span>PROPOSED NEXT STEP {incident.proposal.simulated && <b>SIMULATED</b>}</span><p>{incident.proposal.proposal.reason || incident.proposal.proposal.summary}</p>{incident.proposal.proposal.suggestedEtaMinutes != null && <small>Suggested time: {incident.proposal.proposal.suggestedEtaMinutes} min</small>}</div>}
             <div className="case-actions"><button className="text-link" onClick={() => openIncident(incident.id)}>View timeline <span>→</span></button>
               {(persona === "maintenance" || persona === "reviewer") && incident.status === "new" && <button className="button-outline" disabled={busy} onClick={() => void perform(() => request(`/incidents/${incident.id}/demo-triage`, { method: "POST", body: "{}" }), "A simulated review proposal is ready.", incident.id)}>Prepare review</button>}
@@ -265,13 +310,13 @@ export default function HomePage() {
         </div>
       </section>}
 
-      <footer className="site-footer"><a className="brand mini" href="#home"><CommonGroundMark /><span>common<span>ground</span></span></a><span>Restore the service, support the student.</span><span>Local preview · Wi-Fi support only</span></footer>
+      <footer className="site-footer"><a className="brand mini" href="#home"><CommonGroundMark /><span>Common<span>Ground</span></span></a><span>Restore the service, support the student.</span><span>Local preview · Wi-Fi support only</span></footer>
     </main>
   );
 }
 
 function CommonGroundMark() {
-  return <svg className="brand-mark" viewBox="0 0 40 40" role="img" aria-label="CommonGround mark"><path d="M20 3.5 36.5 13v14L20 36.5 3.5 27V13L20 3.5Z" fill="none" stroke="currentColor" strokeWidth="1.6"/><path d="M12 17.1c1.5-3.2 5.3-4.7 8.4-3.2l2.1 1-2.1 1.1c-1.7.9-2.7 2.8-2.4 4.8.3 2 1.8 3.4 3.7 3.7 2 .3 3.8-.7 4.7-2.4l1.2-2.1 1 2.1c1.5 3.2 0 7-3.2 8.5-3.2 1.5-7 0-8.5-3.2-.4-.9-.6-1.8-.6-2.7-3.5.5-6.8-1.7-7.3-5.2-.2-.8-.1-1.7.2-2.4Z" fill="currentColor"/><circle cx="14" cy="27" r="2.2" fill="#d3f16f"/></svg>;
+  return <svg className="brand-mark" viewBox="0 0 44 44" role="img" aria-label="CommonGround mark"><rect x="1" y="1" width="42" height="42" rx="14" fill="currentColor"/><path d="M9 29c1.2-7.2 5.1-11 11.7-11 2.7 0 4.8.8 6.3 2.5 1.1-1.5 2.7-2.3 4.9-2.3" fill="none" stroke="#fff" strokeWidth="2.6" strokeLinecap="round"/><path d="M8.5 30.5h27M20.7 18v7.2c0 2.8 1.8 4.5 4.6 4.5" fill="none" stroke="#d8f17f" strokeWidth="2.6" strokeLinecap="round"/><circle cx="32.8" cy="18.2" r="3.3" fill="#ffab78"/></svg>;
 }
 
 function NavIcon({ id }: { id: Section }) {
@@ -291,12 +336,33 @@ function IncidentRow({ incident, locations, onClick }: { incident: Incident; loc
   return <button className="recent-request" onClick={onClick}><span className="recent-copy"><Status value={incident.status} student /><strong>{incident.summary}</strong><small>{location} · {new Date(incident.createdAt).toLocaleDateString()}</small></span><span className="recent-arrow">→</span></button>;
 }
 
+function formatElapsed(startAt: string, endAt: string | number): string {
+  const milliseconds = Math.max(0, new Date(endAt).getTime() - new Date(startAt).getTime());
+  const totalMinutes = Math.floor(milliseconds / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes} min`;
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return minutes ? `${hours}h ${minutes}m` : `${hours}h`;
+}
+
 function IncidentDetail({ view, isStudent, locations, onFailure, busy }: { view: IncidentView | null; isStudent: boolean; locations: Location[]; onFailure: () => void; busy: boolean }) {
+  const [clockNow, setClockNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
   if (!view) return <aside className="detail-placeholder"><span className="placeholder-mark">cg</span><h3>Case details</h3><p>Select a request to see its progress and the updates shared by the campus team.</p></aside>;
   const { incident, events } = view;
   const statusText = (value: string) => (isStudent ? studentStatusLabels[value] : statusLabels[value]) ?? value.replaceAll("_", " ");
   const locationName = locations.find((location) => location.id === incident.locationId)?.name ?? "Campus location";
-  return <aside className="detail-panel"><div className="detail-top"><span className="eyebrow">CASE TIMELINE</span><Status value={incident.status} student={isStudent} /></div><h3>{incident.summary}</h3><p className="detail-meta">{locationName} · {new Date(incident.createdAt).toLocaleDateString()}</p><div className="progress-track">{["new", "triage_proposed", "in_progress", "fix_applied", "resolved"].map((step, index) => { const order = ["new", "triage_proposed", "in_progress", "fix_applied", "resolved"]; const active = order.indexOf(incident.status) >= index; return <span key={step} className={active ? "progress-step done" : "progress-step"} title={statusText(step)}><i />{index < order.length - 1 && <b />}</span>; })}</div><p className="progress-caption">{incident.status === "resolved" ? "This case has been resolved." : `${statusText(incident.status)} · We’ll keep this timeline updated.`}</p>{incident.etaMinutes != null && <div className="eta-note"><span>ESTIMATED TIME</span><strong>About {incident.etaMinutes} minutes</strong><small>This is a staff suggestion, not a guarantee.</small></div>}
-    <h4>Updates</h4><ol className="timeline">{events.map((event) => <li key={event.id}><span className="timeline-dot" /><div><strong>{eventLabels[event.eventName] ?? event.eventName.replaceAll(".", " · ")}</strong>{event.reason && <p>{event.reason}</p>}{event.toStatus && <span className="timeline-status">Status · {statusLabels[event.toStatus] ?? event.toStatus.replaceAll("_", " ")}</span>}<small>{new Date(event.createdAt).toLocaleString()}</small></div></li>)}</ol>{isStudent && incident.status === "fix_applied" && <button className="button-quiet failure-button" disabled={busy} onClick={onFailure}>Still having trouble? Let the team know</button>}
+  const reliefEvent = events.find((event) => event.eventName === "staff.update_posted");
+  const repairEvent = events.find((event) => event.eventName === "fix.confirmed");
+  const reliefValue = reliefEvent ? formatElapsed(incident.createdAt, reliefEvent.createdAt) : `${formatElapsed(incident.createdAt, clockNow)} and counting`;
+  const repairValue = repairEvent ? formatElapsed(incident.createdAt, repairEvent.createdAt) : `${formatElapsed(incident.createdAt, clockNow)} and counting`;
+  return <aside className="detail-panel"><div className="detail-top"><span className="eyebrow">CASE TIMELINE</span><Status value={incident.status} student={isStudent} /></div><h3>{incident.summary}</h3><p className="detail-meta">{locationName} · {new Date(incident.createdAt).toLocaleDateString()} · {incident.reportCount ?? 0} {(incident.reportCount ?? 0) === 1 ? "report linked to this case" : "reports linked to this case"}</p><div className="progress-track">{["new", "triage_proposed", "in_progress", "fix_applied", "resolved"].map((step, index) => { const order = ["new", "triage_proposed", "in_progress", "fix_applied", "resolved"]; const active = order.indexOf(incident.status) >= index; return <span key={step} className={active ? "progress-step done" : "progress-step"} title={statusText(step)}><i />{index < order.length - 1 && <b />}</span>; })}</div><p className="progress-caption">{incident.status === "resolved" ? "This case has been resolved." : `${statusText(incident.status)} · We’ll keep this timeline updated.`}</p>{incident.etaMinutes != null && <div className="eta-note"><span>ESTIMATED TIME</span><strong>About {incident.etaMinutes} minutes</strong><small>This is a staff suggestion, not a guarantee.</small></div>}
+    <div className="time-metrics" aria-label="Case response times">
+      <article><span>TIME TO RELIEF</span><strong>{reliefValue}</strong><small>{reliefEvent ? "Report to first human progress update" : "Waiting for the first human progress update"}</small></article>
+      <article><span>TIME TO REPAIR</span><strong>{repairValue}</strong><small>{repairEvent ? "Report to staff-confirmed fix" : "Elapsed time until staff confirms the fix"}</small></article>
+    </div>    <h4>Updates</h4><ol className="timeline">{events.map((event) => <li key={event.id}><span className="timeline-dot" /><div><strong>{eventLabels[event.eventName] ?? event.eventName.replaceAll(".", " · ")}</strong>{event.reason && <p>{event.reason}</p>}{event.toStatus && <span className="timeline-status">Status · {statusLabels[event.toStatus] ?? event.toStatus.replaceAll("_", " ")}</span>}<small>{new Date(event.createdAt).toLocaleString()}</small></div></li>)}</ol>{isStudent && incident.status === "fix_applied" && <button className="button-quiet failure-button" disabled={busy} onClick={onFailure}>Still having trouble? Let the team know</button>}
   </aside>;
 }

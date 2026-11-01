@@ -93,6 +93,7 @@ test("student report access is isolated and staff queue is role-checked", { skip
   assert.ok(ownReports.json<{ incidents: Array<{ id: string }> }>().incidents.some((incident) => incident.id === incidentId));
   assert.equal(otherReports.json<{ incidents: Array<{ id: string }> }>().incidents.some((incident) => incident.id === incidentId), false);
   assert.equal(staffReports.statusCode, 403);
+
 });
 
 test("simulated manual flow persists staff approval and fix status", { skip: !enabled }, async () => {
