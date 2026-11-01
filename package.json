@@ -19,7 +19,9 @@
     "spike:db": "node --env-file-if-exists=.env --import tsx spikes/db.ts",
     "spike:llm": "node --env-file-if-exists=.env --import tsx spikes/llm.ts",
     "migrate:db": "node --env-file-if-exists=.env --import tsx scripts/migrate-db.ts",
-    "check:spikes": "tsc -p tsconfig.spikes.json"
+    "check:spikes": "tsc -p tsconfig.spikes.json",
+    "local:setup": "node scripts/local-setup.mjs",
+    "dev:local": "node scripts/dev-local.mjs"
   },
   "devDependencies": {
     "@types/node": "26.6.6",

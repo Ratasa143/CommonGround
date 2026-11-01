@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Persona = "student-a" | "student-b" | "maintenance" | "facilities" | "reviewer";
-type Section = "overview" | "report" | "requests" | "support" | "queue" | "approvals";
+type Section = "overview" | "report" | "requests" | "support" | "queue" | "approvals" | "swarm";
 type Location = { id: string; name: string };
 type MekoStatus = { mode: "off" | "preview" | "live" | "setup_required"; simulated: boolean; triageReady: boolean; bridgeReady: boolean; curatorReady: boolean; approverReady: boolean };
 type MekoCheck = { ok: boolean; mode?: string; simulated?: boolean; calls?: number; responseReceived?: boolean; message?: string };
+type MekoActivity = { id: string; actor: string; datapack: string; toolName: string; outcome: string; latencyMs: number | null; simulated: boolean; createdAt: string };
 type Incident = {
   id: string; category: string; locationId: string; status: string; summary: string;
   etaMinutes: number | null; createdAt: string; reportCount?: number;
@@ -57,6 +58,8 @@ export default function HomePage() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [mekoStatus, setMekoStatus] = useState<MekoStatus | null>(null);
   const [mekoCheck, setMekoCheck] = useState<MekoCheck | null>(null);
+  const [mekoActivity, setMekoActivity] = useState<MekoActivity[]>([]);
+  const [mekoActivityError, setMekoActivityError] = useState("");
   const [locationId, setLocationId] = useState("north-hostel");
   const [locationFromQr, setLocationFromQr] = useState(false);
   const [symptom, setSymptom] = useState("offline");
@@ -128,6 +131,21 @@ export default function HomePage() {
     if (!isStudent && !incidentId && queue[0]) setIncidentId(queue[0].id);
   }, [isStudent, incidentId, queue]);
   useEffect(() => {
+    if (section !== "swarm" || isStudent) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const result = await request("/meko/activity") as { activity: MekoActivity[] };
+        if (active) { setMekoActivity(result.activity ?? []); setMekoActivityError(""); }
+      } catch (error) {
+        if (active) setMekoActivityError(error instanceof Error ? error.message : "Could not load Meko activity.");
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => { if (!document.hidden) void refresh(); }, 10000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [section, isStudent, request]);
+  useEffect(() => {
     if (!incidentId) { setView(null); return; }
     void loadIncident(incidentId);
     const stream = new EventSource(`/api/incidents/${incidentId}/events?persona=${persona}`);
@@ -170,8 +188,8 @@ export default function HomePage() {
   const current = view?.incident;
   const filteredQueue = queue.filter((item) => queueFilter === "all" || item.status === queueFilter);
   const staffTabs: Array<[Section, string]> = persona === "reviewer"
-    ? [["queue", "All cases"], ["approvals", "Needs review"]]
-    : [["queue", "Case queue"]];
+    ? [["queue", "All cases"], ["approvals", "Needs review"], ["swarm", "Swarm"]]
+    : [["queue", "Case queue"], ["swarm", "Swarm"]];
   const tabs: Array<[Section, string]> = isStudent
     ? [["overview", "Home"], ["report", "Report an issue"], ["requests", "My requests"], ["support", "Support"]]
     : staffTabs;
@@ -182,8 +200,10 @@ export default function HomePage() {
         requests: ["Your requests.", "See the latest status and updates shared by campus teams."],
         support: ["Support, on your terms.", "Browse support options without sharing personal details here."],
       }[section as "overview" | "report" | "requests" | "support"]
-    : section === "approvals"
-      ? ["Review the next step.", "Read each proposal and make the decision as a person."]
+    : section === "swarm"
+      ? ["Meko swarm", "See agent readiness and the real Meko call log."]
+      : section === "approvals"
+        ? ["Review the next step.", "Read each proposal and make the decision as a person."]
       : personaInfo.role === "Maintenance"
         ? ["Restore campus service.", "Clear cases, accountable updates, and decisions made by people."]
         : personaInfo.role === "Reviewer"
@@ -290,7 +310,18 @@ export default function HomePage() {
         <div className="choice-note"><span>YOUR CHOICE MATTERS</span><p>You decide what to share and whom to contact. You can ask about support options without making a formal complaint. A trained campus contact can explain the process and any limits to confidentiality before you disclose details.</p></div>
       </section>}
 
-      {!isStudent && <section className="work-area">
+      {!isStudent && section === "swarm" && <section className="work-area swarm-work-area">
+        <div className="swarm-heading"><div><span className="swarm-kicker"><i /> MEKO · AUDITABLE AGENTS</span><h2>One workflow, specialist agents.</h2><p>People keep authority over repairs and approvals. This board shows configured roles and recorded Meko calls.</p></div><button className="button-outline" onClick={() => void runMekoCheck()} disabled={busy}>Run synthetic Meko check ↗</button></div>
+        <div className="agent-grid" aria-label="Meko role readiness">
+          {([["triage", "Triage", "Finds relevant repair lessons", mekoStatus?.triageReady], ["bridge", "Bridge Steward", "Coordinates opted-in study support", mekoStatus?.bridgeReady], ["curator", "Curator", "Prepares non-identifying lessons", mekoStatus?.curatorReady], ["approver", "Approval Service", "Promotes only after human approval", mekoStatus?.approverReady]] as Array<[string, string, string, boolean | undefined]>).map(([id, label, purpose, ready]) => <article className="agent-card" key={id}><span className={`agent-orb agent-${id}`}>{id === "triage" ? "T" : id === "bridge" ? "B" : id === "curator" ? "C" : "A"}</span><div><strong>{label}</strong><small>{purpose}</small></div><span className={`agent-state ${ready ? "ready" : "waiting"}`}>{ready ? "Ready" : "Needs access"}</span></article>)}
+        </div>
+        <div className="swarm-log-card"><div className="swarm-log-head"><div><span className="eyebrow">RECENT ACTIVITY</span><h3>Meko call log</h3></div><span className="swarm-count">{mekoActivity.length} recent {mekoActivity.length === 1 ? "call" : "calls"}</span></div>
+          {mekoActivityError ? <div className="swarm-empty">{mekoActivityError}</div> : mekoActivity.length ? <div className="swarm-log-list">{mekoActivity.map((call) => <article className="swarm-log-row" key={call.id}><span className={`call-outcome outcome-${call.outcome}`}>{call.outcome}</span><div className="call-main"><strong>{call.actor} <span>·</span> {call.toolName}</strong><small>{call.datapack} · {call.simulated ? "simulated" : "live"} · {call.latencyMs == null ? "—" : `${call.latencyMs} ms`}</small></div><time dateTime={call.createdAt}>{new Date(call.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time></article>)}</div> : <div className="swarm-empty"><span className="swarm-empty-mark">◎</span><strong>No Meko calls recorded yet</strong><p>Configure the product Triage key, then run the synthetic check. Every successful or failed tool call appears here from the database log.</p></div>}
+        </div>
+        <p className="swarm-footnote">Live preview check is synthetic and carries no ticket or student data. Bridge matching remains a separate opt-in product flow.</p>
+      </section>}
+
+      {!isStudent && section !== "swarm" && <section className="work-area">
         <div className="page-heading"><div><p className="eyebrow">{personaInfo.role.toUpperCase()} WORKSPACE</p><h2>{workHeading[0]}</h2><p>{workHeading[1]}</p></div><button className="button-outline" onClick={() => void loadQueue()}>↻ <span>Refresh cases</span></button></div>
         <div className="queue-toolbar"><span>{filteredQueue.length} {filteredQueue.length === 1 ? "case" : "cases"}{section === "approvals" ? " to review" : " in your view"}</span></div>
         {(persona === "maintenance" || persona === "reviewer") && <section className="meko-test-panel" aria-label="Meko connection check"><div className="meko-test-copy"><span className={`meko-led ${mekoStatus?.mode === "live" ? "live" : mekoStatus?.mode === "preview" ? "preview" : ""}`} /><div><strong>{mekoStatus?.mode === "live" ? "Meko Triage is ready" : mekoStatus?.mode === "preview" ? "Meko preview is simulated" : mekoStatus?.mode === "off" ? "Meko is switched off" : "Connect Meko for the evaluation"}</strong><small>Runs a fixed synthetic query. No ticket, student or Bridge data is sent.</small></div></div><button className="button-outline" onClick={() => void runMekoCheck()} disabled={busy}>Run Meko check <span aria-hidden="true">↗</span></button>{mekoCheck && <p className={`meko-check-result ${mekoCheck.ok ? "success" : "error"}`} role="status">{mekoCheck.ok ? `Meko responded · ${mekoCheck.simulated ? "simulated" : "live"} · ${mekoCheck.calls ?? 0} tool calls` : mekoCheck.message ?? "Meko check failed."}</p>}</section>}
@@ -327,6 +358,7 @@ function NavIcon({ id }: { id: Section }) {
     support: "M20.8 8.8c0 4.1-8.8 10-8.8 10s-8.8-5.9-8.8-10A4.8 4.8 0 0 1 12 6a4.8 4.8 0 0 1 8.8 2.8Z",
     queue: "M4 5h16M4 12h16M4 19h16",
     approvals: "m5 12 4 4L19 6",
+    swarm: "M12 4a2 2 0 1 0 0 .01M5 17a2 2 0 1 0 0 .01M19 17a2 2 0 1 0 0 .01M12 6v4m-5 5 3-3m7 3-3-3M7 17h10",
   };
   return <svg className="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={paths[id]} /></svg>;
 }

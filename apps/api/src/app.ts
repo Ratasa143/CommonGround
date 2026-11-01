@@ -77,6 +77,16 @@ export async function buildApp(pool = createPool(), options: { logger?: boolean;
 
   app.get("/health", async () => ({ status: "ok" }));
   app.get("/meko/status", async () => meko.getStatus());
+  app.get("/meko/activity", async (request) => {
+    const persona = personaFor(request);
+    requireActor(persona, "maintenance_staff", "facilities_staff", "reviewer");
+    const result = await pool.query(
+      `SELECT id, actor, datapack, tool_name AS "toolName", outcome,
+              latency_ms AS "latencyMs", simulated, created_at AS "createdAt"
+       FROM meko_call_log ORDER BY created_at DESC LIMIT 24`,
+    );
+    return { activity: result.rows };
+  });
   app.post("/meko/preview-check", async (request, reply) => {
     const persona = personaFor(request);
     requireActor(persona, "maintenance_staff", "reviewer");
